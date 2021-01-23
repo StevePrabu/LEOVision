@@ -1,0 +1,292 @@
+#!/usr/bin/env python
+from __future__ import division, print_function
+from casacore.tables import table, taql
+import numpy as np
+from astropy.coordinates import EarthLocation
+from astropy.time import Time
+from skyfield.api import EarthSatellite
+from skyfield.api import Topos, load
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+from argparse import ArgumentParser
+from multiprocessing import Pool
+import time as tm
+import json
+
+
+def msTime2UTC(time):
+    """
+    converts from the wierd ms time format to usable time
+
+    Parameters
+    ----------
+    time    : the wierd ms time
+
+    Returs
+    ------
+    time    : useful time
+    """
+
+    time /= (24*3600)
+    tmp = Time(time, format='mjd')
+
+    return tmp.datetime
+
+def getLatLonAlt(x, y, z):
+    """
+    convert geocentric cartesian coordinates to lat lon and alt
+
+    Parameters
+    ----------
+    x   : x coordinate
+    y   : y coordinate
+    z   : z coordinate
+
+    Returns
+    -------
+    lat : latitude
+    lon : longitude
+    alt : altitude
+    """
+
+    pos = EarthLocation.from_geocentric(x,y,z, unit="m").to_geodetic()
+
+    return pos.lat.degree, pos.lon.degree, pos.height
+
+def getRange(x, y, z, line1, line2, line3, time):
+    """
+    gets line of sight range from observer to the satellite at given time
+
+    Parameters
+    ----------
+    x       : x geocentric coordinate of the observer
+    y       : y geocentric coordinate of the observer
+    z       : z geocentric coordinate of the observer
+    line1   : line1 of the tle
+    line2   : line2 of the tle
+    line3   : line3 of the tle
+    time    : the utc of the current time
+
+    Returns
+    -------
+    range   : los distance in m
+    """
+
+    lat, lon, alt = getLatLonAlt(x, y, z)
+
+    ## the below observor creation only works for south-eastern hemishpere.
+    ## TODO remove hard coded behaviour of below section
+    observer = Topos(str(abs(lat)) + " S", 
+                    str(abs(lon)) + " E", 
+                    elevation_m= float(str(alt)[:-1]))
+    sat = EarthSatellite(line2, line3, line1, ts)
+    utc = ts.utc(time.year, time.month, 
+                time.day, time.hour, 
+                time.minute, time.second)
+    sat.at(utc)
+    difference = sat - observer
+    topocentric = difference.at(utc)
+    ra, dec, distance = topocentric.radec()
+
+    return distance.m
+
+
+def loadMS(msName, debug):
+    """
+    loads the required data from measurement set
+
+    Parameters
+    ----------
+    msName      : the name of the measurement set
+
+    Returns
+    -------
+    msdata      : the CORRECTED DATA column
+    msuvw       : the uvw column
+    mstime      : the time column (super weird MJD format)
+    msant1      : the antenna1 column
+    msant2      : the antenna2 column
+    mswavelength: the wavelengths 
+    antloc      : antenna locations
+    """
+
+    start = tm.time()
+    ms = table(msName, readonly=True)
+    msdata = ms.getcol("CORRECTED_DATA")
+    msuvw = ms.getcol("UVW")
+    mstime = ms.getcol("TIME")
+    msant1 = ms.getcol("ANTENNA1")
+    msant2 = ms.getcol("ANTENNA2")
+    msfreq = ms.SPECTRAL_WINDOW.getcell("CHAN_FREQ", 0)
+    antloc = ms.ANTENNA.getcol("POSITION")
+    ms.close
+
+    # calculate wavelength
+    mswavelength = 299792458/msfreq
+
+    elapsed = tm.time() - start
+
+    if debug:
+        print("data loaded from ms. time elapsed {}s".format(elapsed))    
+
+    return msdata, msuvw, mstime, msant1, msant2, mswavelength, antloc
+
+
+def getTLE(fileName):
+    """
+    loads the txt file in json format and returns the TLE values
+
+    Parameters
+    ----------
+    fileName    : the txt file name
+
+    Returns
+    -------
+    line1       : line1 of TLE
+    line2       : line2 of TLE
+    line3       : line3 of TLE
+    """
+    with open(fileName) as json_file:
+        fileData = json.load(json_file)
+
+    line1 = fileData[0]["OBJECT_NAME"]
+    line2 = fileData[0]["TLE_LINE1"]
+    line3 = fileData[0]["TLE_LINE2"]
+
+    return line1, line2, line3
+
+
+def getPhase(ant1, ant2, antloc, line1, line2, line3, time, old_w):
+    """
+    gets the new w value and the complex phase (m)
+
+    Parameters
+    ----------
+    ant1        : antenna 1 for the baseline
+    ant2        : antenna 2 for the baseline
+    antloc      : array with all ant geocenctric cartesion positions
+    line1       : TLE line1
+    line2       : TLE line2
+    line3       : TLE line3
+    time        : the current time object
+    old_w       : the w value from ms (for a far-field source)
+
+    Returns
+    -------
+    phi         : the phase correction
+    w_new       : the new w value for a near-field object
+    dist        : physical baseline lenght (not projected)
+    """
+
+    ## get ant locations
+    x1, y1, z1 = antloc[ant1]
+    x2, y2, z2 = antloc[ant2]
+
+    dist = np.sqrt((x1 - x2)**2 + (y1 - y2)**2 + (z1 - z2)**2)
+    r1 = getRange(x1, y1, z1, line1, line2, line3, time)
+    r2 = getRange(x2, y2, z2, line1, line2, line3, time)
+
+    phi = (r2 - r1) - w ## look in the documentaion for diagram
+    w_new = r2 - r1
+
+    return phi_w, w_new, dist
+
+def worker(i):
+    """
+    worker func for a single thread
+    """
+    ant1 = msant1[i]
+    ant2 = msant2[i]
+    time_tmp = mstime[i]
+
+    time = msTime2UTC(time_tmp)
+
+    if (str(time) == head_time) or (str(time) == tail_time):
+
+        ## filter out auto corr.
+        if ant1 !=  ant2:
+            tmp_time = datetime.strptime(head_time, '%Y-%m-%d %H:%M:%S')
+            phi, w_new, dist = getPhase(ant1, ant2, ms, line1, line2, line3, tmp_time, msuvw[i][2])
+
+
+            ## update w value
+            msuvw[i][2] = w_new
+
+            ## update the phase in the visibilities
+            for f in range(noChannels):
+                tmp = np.copy(msdata[i][f])
+                phase = -2j*np.pi*phi/mswavelenght[f]
+                msdata[i][f] = tmp*np.exp(phase)
+
+    return
+
+def main(args):
+    
+    global_start = tm.time()
+    ## load data
+    global msdata, msuvw, mstime, msant1, msant2, mswavelength, antloc, noChannels
+    msdata, msuvw, mstime, msant1, msant2, mswavelength, antloc = loadMS(args.ms, args.debug)
+    entries = len(msant1) ## no. of entries in the measurement set timeStep x [no.baselines + auto corr.]
+    noChannels = msdata.shape[1] ## no. of fine channels in ms
+
+    ## load tle from file
+    line1, line2, line3 = getTLE(args.tle) 
+
+    ## iterate through ms rows and update values
+    start = tm.time()
+    p = Pool(args.j)
+    p.map(worker, range(entries))
+
+    elapsed = tm.time() - start
+
+    if args.debug:
+        print("phase correction done. time elapsed {}s".format(elapsed))
+
+
+    ## write data back to ms
+    if args.debug:
+        print("writing data to ms...")
+
+    start = tm.time()
+    ms = table(args.ms, readonly=False, ack=False)
+    ms.putcol("CORRECTED_DATA", msdata)
+    ms.putcol("UVW", msuvw)
+    ms.flush()
+    ms.close()
+
+    elapsed = tm.time() - start
+
+    if args.debug:
+        print("...finished writing to ms. time elapsed {}s".format(elapsed))
+        print("total time taken {}.s".format(tm.time()- global_start))
+
+    
+
+
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser("LEOVision", description="does near field calculation, and applies w and phase correction for curvature")    
+    parser.add_argument("--ms", required=True, help="the measurements set name")
+    parser.add_argument("--tle", required=True, help="the TLE jason file")
+    parser.add_argument("--headTime", required=True, help="the head time in format YEAR-0M-0DT0h:0m:0s")
+    parser.add_argument("--tailTime", required=True, help="the tail time in format YEAR-0M-0DT0h:0m:0s")
+    parser.add_argument("--j", default=10, type=int, help="no. of threads.default 10")
+    parser.add_argument("--debug", type=bool, default=False, help="runs script in debug mode. default False")
+    args = parser.parse_args()
+
+    if args.debug:
+        print("running LEOVision in debug mode")
+
+    global ts, head_time, tail_time
+    ts = load.timescale(builtin=True)
+
+    ## modify datetime format
+    head_time = args.headTime
+    tail_time = args.tailTime
+
+    
+    main(args)
+
+
+
