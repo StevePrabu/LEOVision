@@ -240,10 +240,12 @@ def main(args):
 
     ## iterate through ms rows and update values
     start = tm.time()
-    p = Pool(args.j)
-    p.map(worker, range(entries))
-
+    #p = Pool(args.j)
+    #p.map(worker, range(entries))
+    for i in range(entries):
+        worker(i)
     elapsed = tm.time() - start
+
 
     if args.debug:
         print("phase correction done. time elapsed {}s".format(elapsed))
@@ -263,10 +265,17 @@ def main(args):
     elapsed = tm.time() - start
 
     ## do all plotting
+    print(dist_array)
+    print(w_array)
+    print(phi_array)
+    print(np.all(dist_array == 0))
     plt.scatter(dist_array, w_array, label="old w", marker="x", s=3)
     plt.scatter(dist_array, w_new_array, label="new w", s=3, marker="o", alpha=0.4)
     plt.scatter(dist_array, phi_array, label="delta w", marker="v", s=3)
-    plt.savefig("{}wTerms.png", dpi=300)
+    plt.legend()
+    plt.xlabel("distance (m)")
+    plt.ylabel("w (m)")
+    plt.savefig("{}wTerms.png".format(args.t), dpi=300)
 
     if args.debug:
         print("...finished writing to ms. time elapsed {}s".format(elapsed))
