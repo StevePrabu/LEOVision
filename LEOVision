@@ -217,10 +217,15 @@ def worker(i):
             msuvw[i][2] = w_new
 
             ## update the phase in the visibilities
-            for f in range(noChannels):
-                tmp = np.copy(msdata[i][f])
-                phase = -2j*np.pi*phi/mswavelength[f]
-                msdata[i][f] = tmp*np.exp(phase)
+            #for f in range(noChannels):
+            #    tmp = np.copy(msdata[i][f])
+            #    phase = -2j*np.pi*phi/mswavelength[f]
+            #    msdata[i][f] = tmp*np.exp(phase)
+
+            phase = -2j*np.pi*phi/mswavelength
+            for pol in range(4):
+                tmp = np.copy(msdata[i,:,pol])
+                msdata[i,:,pol] = tmp*np.exp(phase)
 
     return
 
@@ -243,7 +248,9 @@ def main(args):
     #p = Pool(args.j)
     #p.map(worker, range(entries))
     for i in range(entries):
+        t1 = tm.time()
         worker(i)
+        t2 = tm.time()
     elapsed = tm.time() - start
 
 
