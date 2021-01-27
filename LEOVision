@@ -267,7 +267,7 @@ def main(args):
         print("pre-calculating skyfield position measurements...")
 
     start = tm.time()
-    
+
     mwa_range = skyfield_calculations()
 
     elapsed = tm.time() - start
@@ -281,9 +281,8 @@ def main(args):
     #p = Pool(args.j)
     #p.map(worker, range(entries))
     for i in range(entries):
-        t1 = tm.time()
         worker(i)
-        t2 = tm.time()
+
     elapsed = tm.time() - start
 
 
@@ -305,10 +304,6 @@ def main(args):
     elapsed = tm.time() - start
 
     ## do all plotting
-    print(dist_array)
-    print(w_array)
-    print(phi_array)
-    print(np.all(dist_array == 0))
     plt.scatter(dist_array, w_array, label="old w", marker="x", s=3)
     plt.scatter(dist_array, w_new_array, label="new w", s=3, marker="o", alpha=0.4)
     plt.scatter(dist_array, phi_array, label="delta w", marker="v", s=3)
