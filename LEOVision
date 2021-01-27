@@ -183,8 +183,8 @@ def getPhase(ant1, ant2, antloc, line1, line2, line3, time, old_w):
     x2, y2, z2 = antloc[ant2]
 
     dist = np.sqrt((x1 - x2)**2 + (y1 - y2)**2 + (z1 - z2)**2)
-    r1 = getRange(x1, y1, z1, line1, line2, line3, time)
-    r2 = getRange(x2, y2, z2, line1, line2, line3, time)
+    r1 = mwa_range[ant1]
+    r2 = mwa_range[ant2]
 
     phi = (r2 - r1) - old_w ## look in the documentaion for diagram
     w_new = r2 - r1
@@ -229,6 +229,24 @@ def worker(i):
 
     return
 
+
+def skyfield_calculations():
+    """
+    does pre-calculations so that iterating thro baselines happens faster
+    """
+
+    head_ranges = []
+
+    for tile in range(128):
+        x, y, z = antloc[tile]
+        r = getRange(x, y, z, line1, line2, line3, head_time)
+        head_ranges.append(r)
+
+    return head_ranges
+
+
+
+
 def main(args):
     
     global_start = tm.time()
@@ -242,6 +260,21 @@ def main(args):
     global line1, line2, line3, phi_array, w_new_array, dist_array, w_array
     phi_array, w_new_array, dist_array, w_array = np.zeros(entries), np.zeros(entries), np.zeros(entries), np.zeros(entries)
     line1, line2, line3 = getTLE(args.tle) 
+
+    ## pre-calculate skyfield position measurements
+    global mwa_range
+    if args.debug:
+        print("pre-calculating skyfield position measurements...")
+
+    start = tm.time()
+    
+    mwa_range = skyfield_calculations()
+
+    elapsed = tm.time() - start
+
+    if args.debug:
+        print("...done. time elapsed {}s".format(elapsed))
+    
 
     ## iterate through ms rows and update values
     start = tm.time()
