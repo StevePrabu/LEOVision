@@ -338,7 +338,10 @@ if __name__ == "__main__":
     ts = load.timescale(builtin=True)
 
     ## modify datetime format
-    head_time = datetime.strptime(args.headTime, '%Y-%m-%dT%H:%M:%S.%f')
+    try:
+        head_time = datetime.strptime(args.headTime, '%Y-%m-%dT%H:%M:%S.%f')
+    except:
+        head_time = datetime.strptime(args.headTime, '%Y-%m-%dT%H:%M:%S')
     tail_time = head_time + timedelta(seconds=-2)
     
     
