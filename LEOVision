@@ -12,6 +12,7 @@ from argparse import ArgumentParser
 from multiprocessing import Pool
 import time as tm
 import json
+import csv
 
 
 def msTime2UTC(time):
@@ -191,7 +192,7 @@ def getPhase(ant1, ant2, antloc, line1, line2, line3, time, old_w):
 
     return phi, w_new, dist
 
-def worker(i):
+def worker(i, args):
     """
     worker func for a single thread
     """
@@ -200,6 +201,7 @@ def worker(i):
     time_tmp = mstime[i]
 
     time = msTime2UTC(time_tmp)
+    time_array.append(time)
 
     if (str(time) == str(head_time)) or (str(time) == str(tail_time)):
 
@@ -208,20 +210,15 @@ def worker(i):
             tmp_time = head_time
             phi, w_new, dist = getPhase(ant1, ant2, antloc, line1, line2, line3, tmp_time, msuvw[i][2])
 
-            phi_array[i] = phi
-            w_new_array[i] = w_new
-            dist_array[i] = dist
-            w_array[i] = msuvw[i][2]
+            phi_array.append(phi)
+            w_new_array.append(w_new)
+            dist_array.append(dist)
+            w_array.append(msuvw[i][2])
 
             ## update w value
             msuvw[i][2] = w_new
 
-            ## update the phase in the visibilities
-            #for f in range(noChannels):
-            #    tmp = np.copy(msdata[i][f])
-            #    phase = -2j*np.pi*phi/mswavelength[f]
-            #    msdata[i][f] = tmp*np.exp(phase)
-
+            ## perform phase correction to visibilities            
             phase = -2j*np.pi*phi/mswavelength
             for pol in range(4):
                 tmp = np.copy(msdata[i,:,pol])
@@ -257,8 +254,9 @@ def main(args):
     noChannels = msdata.shape[1] ## no. of fine channels in ms
 
     ## load tle from file 
-    global line1, line2, line3, phi_array, w_new_array, dist_array, w_array
-    phi_array, w_new_array, dist_array, w_array = np.zeros(entries), np.zeros(entries), np.zeros(entries), np.zeros(entries)
+    global line1, line2, line3, phi_array, w_new_array, dist_array, w_array, time_array
+    phi_array, w_new_array, dist_array, w_array = [], [], [], []
+    time_array = []
     line1, line2, line3 = getTLE(args.tle) 
 
     ## pre-calculate skyfield position measurements
@@ -281,7 +279,7 @@ def main(args):
     #p = Pool(args.j)
     #p.map(worker, range(entries))
     for i in range(entries):
-        worker(i)
+        worker(i, args)
 
     elapsed = tm.time() - start
 
@@ -302,7 +300,14 @@ def main(args):
     ms.close()
 
     elapsed = tm.time() - start
-
+    
+    
+    if args.debug:
+        print("...finished writing to ms. time elapsed {}s".format(elapsed))
+        print("plotting and writing log to file...")    
+        
+    
+    start = tm.time()
     ## do all plotting
     plt.scatter(dist_array, w_array, label="old w", marker="x", s=3)
     plt.scatter(dist_array, w_new_array, label="new w", s=3, marker="o", alpha=0.4)
@@ -311,9 +316,25 @@ def main(args):
     plt.xlabel("distance (m)")
     plt.ylabel("w (m)")
     plt.savefig("{}wTerms.png".format(args.t), dpi=300)
-
+    
+    
+    ## write data to output files
+    with open("LEOVision-Logs-ms" + str(args.ms)[:-3] + "-norad" + str(args.tle)[:-4] + ".csv", "a") as vsc:
+        thewriter = csv.writer(vsc)
+        for d, w_new, w_old, phi in zip(dist_array, w_new_array, w_array, phi_array):
+            line = [d, w_new, w_old, phi, head_time]
+            thewriter.writerow(line)
+           
+    time_array = set(time_array)
+    with open("timelog" + str(args.ms)[:-3] +  ".csv", "w") as vsc:
+        thewriter = csv.writer(vsc)
+        for t in time_array:
+            thewriter.writerow([str(t)])
+            
+    elapsed = tm.time() - start
+    
     if args.debug:
-        print("...finished writing to ms. time elapsed {}s".format(elapsed))
+        print("...finished wriing logs. time elapsed {}s".format(elapsed))
         print("total time taken {}.s".format(tm.time()- global_start))
 
     
