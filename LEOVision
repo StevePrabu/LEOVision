@@ -233,8 +233,9 @@ def skyfield_calculations():
     """
 
     head_ranges = []
+    noTiles = antloc.shape[0]
 
-    for tile in range(128):
+    for tile in range(noTiles):
         x, y, z = antloc[tile]
         r = getRange(x, y, z, line1, line2, line3, head_time)
         head_ranges.append(r)
